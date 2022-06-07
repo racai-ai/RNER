@@ -1,26 +1,23 @@
-from fairseq.models.roberta import XLMRModel
-import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from model.LateralInhibition import LateralInhibition
+from model.LayerXLMREmbeddings import LayerXLMREmbeddings
 
-class XLMRForTokenClassification(nn.Module):
+class ModelNER(nn.Module):
 
     def __init__(self, pretrained_path, n_labels, hidden_size, dropout_p,seq_len, label_ignore_idx=0,
-                head_init_range=0.04, device='cuda',use_norm=False,use_li=False,li_dropout_p=0.1,li_sigma=10):
+                head_init_range=0.04, device='cuda', use_norm=False, use_li=False, li_dropout_p=0.1,
+                li_sigma=10):
         super().__init__()
 
         self.n_labels = n_labels
 
         self.seq_len=seq_len
-        
-        self.use_li=use_li
-        self.li_dropout_p=li_dropout_p
-        if self.use_li:
-            self.li = LateralInhibition(hidden_size, li_sigma)
-            if self.li_dropout_p>0:
-                self.li_dropout = nn.Dropout(li_dropout_p)
+
+        self.xlmr = LayerXLMREmbeddings(
+            pretrained_path=pretrained_path, hidden_size=hidden_size,
+            device=device, use_norm=use_norm,
+            use_li=use_li, li_dropout_p=li_dropout_p, li_sigma=li_sigma)
 
         self.linear_1 = nn.Linear(hidden_size, hidden_size)
         self.dropout = nn.Dropout(dropout_p)
@@ -29,13 +26,6 @@ class XLMRForTokenClassification(nn.Module):
         
         self.label_ignore_idx = label_ignore_idx
 
-        self.xlmr = XLMRModel.from_pretrained(pretrained_path)
-        self.model = self.xlmr.model
-
-        self.use_norm=use_norm
-        if self.use_norm:
-            self.norm=nn.BatchNorm1d(seq_len)
-        
         self.device=device
 
         # initializing classification head
@@ -55,15 +45,7 @@ class XLMRForTokenClassification(nn.Module):
             loss: Cross Entropy loss between labels and logits
 
         '''
-        transformer_out, _ = self.model(inputs_ids, features_only=True)
-
-        if self.use_li:
-            transformer_out = self.li(transformer_out)
-            if self.li_dropout_p>0:
-                transformer_out = self.li_dropout(transformer_out)
-
-        if self.use_norm:
-            transformer_out=self.norm(transformer_out)
+        transformer_out = self.xlmr(inputs_ids)
 
         out_1 = F.relu(self.linear_1(transformer_out))
         out_1 = self.dropout(out_1)
@@ -87,9 +69,10 @@ class XLMRForTokenClassification(nn.Module):
             return logits
 
     def encode_word(self, s):
-        """
-        takes a string and returns a list of token ids
-        """
-        tensor_ids = self.xlmr.encode(s)
+        return self.xlmr.encode_word(s)
+        #"""
+        #takes a string and returns a list of token ids
+        #"""
+        #tensor_ids = self.xlmr.encode(s)
         # remove <s> and </s> ids
-        return tensor_ids.cpu().numpy().tolist()[1:-1]
+        #return tensor_ids.cpu().numpy().tolist()[1:-1]

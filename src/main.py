@@ -1,28 +1,21 @@
 from __future__ import absolute_import, division, print_function
 
 import argparse
-import csv
-import json
 import logging
 import os
 import random
 import sys
+import gc
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from pytorch_transformers import AdamW, WarmupLinearSchedule
-from torch import nn
-from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
-                              TensorDataset)
-
-from seqeval.metrics import classification_report
-from model.xlmr_for_token_classification import XLMRForTokenClassification
+from torch.utils.data import DataLoader, RandomSampler
+from model.ModelUtils import get_model_for_task
 from utils.train_utils import add_xlmr_args, evaluate_model, predict_model
-from utils.data_utils import NerProcessor, create_dataset, convert_examples_to_features
+from utils.data_utils import create_dataset,get_processor_for_task
 
 from tqdm import tqdm as tqdm
-from tqdm import trange
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
@@ -57,9 +50,9 @@ def main():
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
-    processor = NerProcessor(labels=args.labels)
+    processor = get_processor_for_task(task=args.task_name,labels=args.labels,ner_labels=args.ner_labels,debug=args.debug)
     label_list = processor.get_labels()
-    num_labels = len(label_list) + 1  # add one for IGNORE label
+    num_labels = len(label_list)
 
     train_examples = None
     num_train_optimization_steps = 0
@@ -78,10 +71,90 @@ def main():
     device = 'cuda' if (torch.cuda.is_available() and not args.no_cuda) else 'cpu'
 
     # creating model
-    model = XLMRForTokenClassification(pretrained_path=args.pretrained_path,
-                                       n_labels=num_labels, hidden_size=hidden_size, seq_len=args.max_seq_length,
-                                       dropout_p=args.dropout, device=device, use_norm=args.use_norm, use_li=args.use_li, 
+    model = get_model_for_task(args.task_name,pretrained_path=args.pretrained_path,
+                                       num_labels=num_labels, hidden_size=hidden_size,
+                                       dropout_p=args.dropout, device=device,
+                                       num_languages=len(args.labels), use_norm=args.use_norm, 
+                                       use_li=args.use_li, seq_len=args.max_seq_length,
                                        li_dropout_p=args.li_dropout, li_sigma=args.li_sigma)
+    
+    if args.task_name=="ner_multi" and args.do_train:
+        print("Loading pre-trained lang_detect model {}".format(args.pretrained_lang_detect))
+        sd=torch.load(os.path.join(args.pretrained_lang_detect,"model.pt"),map_location=device)
+        with torch.no_grad():
+            model.lang_detect.linear_1.weight.copy_(sd['lang_detect.linear_1.weight'])
+            model.lang_detect.linear_1.bias.copy_(sd['lang_detect.linear_1.bias'])
+            model.lang_detect.classification_head.weight.copy_(sd['lang_detect.classification_head.weight'])
+            model.lang_detect.classification_head.bias.copy_(sd['lang_detect.classification_head.bias'])
+        del sd
+
+        for i in range(len(args.labels)):
+            print("Loading pre-trained ner model {} -> {}".format(args.labels[i],args.pretrained_ner[i]))
+            sd=torch.load(os.path.join(args.pretrained_ner[i],"model.pt"),map_location=device)
+            with torch.no_grad():
+                if i==0:
+                    model.lang_linear_0.weight.copy_(sd['linear_1.weight'])
+                    model.lang_linear_0.bias.copy_(sd['linear_1.bias'])
+                    model.lang_class_0.weight.copy_(sd['classification_head.weight'])
+                    model.lang_class_0.bias.copy_(sd['classification_head.bias'])
+                elif i==1:
+                    model.lang_linear_1.weight.copy_(sd['linear_1.weight'])
+                    model.lang_linear_1.bias.copy_(sd['linear_1.bias'])
+                    model.lang_class_1.weight.copy_(sd['classification_head.weight'])
+                    model.lang_class_1.bias.copy_(sd['classification_head.bias'])
+                elif i==2:
+                    model.lang_linear_2.weight.copy_(sd['linear_1.weight'])
+                    model.lang_linear_2.bias.copy_(sd['linear_1.bias'])
+                    model.lang_class_2.weight.copy_(sd['classification_head.weight'])
+                    model.lang_class_2.bias.copy_(sd['classification_head.bias'])
+                elif i==3:
+                    model.lang_linear_3.weight.copy_(sd['linear_1.weight'])
+                    model.lang_linear_3.bias.copy_(sd['linear_1.bias'])
+                    model.lang_class_3.weight.copy_(sd['classification_head.weight'])
+                    model.lang_class_3.bias.copy_(sd['classification_head.bias'])
+                elif i==4:
+                    model.lang_linear_4.weight.copy_(sd['linear_1.weight'])
+                    model.lang_linear_4.bias.copy_(sd['linear_1.bias'])
+                    model.lang_class_4.weight.copy_(sd['classification_head.weight'])
+                    model.lang_class_4.bias.copy_(sd['classification_head.bias'])
+                elif i==5:
+                    model.lang_linear_5.weight.copy_(sd['linear_1.weight'])
+                    model.lang_linear_5.bias.copy_(sd['linear_1.bias'])
+                    model.lang_class_5.weight.copy_(sd['classification_head.weight'])
+                    model.lang_class_5.bias.copy_(sd['classification_head.bias'])
+                elif i==6:
+                    model.lang_linear_6.weight.copy_(sd['linear_1.weight'])
+                    model.lang_linear_6.bias.copy_(sd['linear_1.bias'])
+                    model.lang_class_6.weight.copy_(sd['classification_head.weight'])
+                    model.lang_class_6.bias.copy_(sd['classification_head.bias'])
+                elif i==7:
+                    model.lang_linear_7.weight.copy_(sd['linear_1.weight'])
+                    model.lang_linear_7.bias.copy_(sd['linear_1.bias'])
+                    model.lang_class_7.weight.copy_(sd['classification_head.weight'])
+                    model.lang_class_7.bias.copy_(sd['classification_head.bias'])
+                elif i==8:
+                    model.lang_linear_8.weight.copy_(sd['linear_1.weight'])
+                    model.lang_linear_8.bias.copy_(sd['linear_1.bias'])
+                    model.lang_class_8.weight.copy_(sd['classification_head.weight'])
+                    model.lang_class_8.bias.copy_(sd['classification_head.bias'])
+                elif i==9:
+                    model.lang_linear_9.weight.copy_(sd['linear_1.weight'])
+                    model.lang_linear_9.bias.copy_(sd['linear_1.bias'])
+                    model.lang_class_9.weight.copy_(sd['classification_head.weight'])
+                    model.lang_class_9.bias.copy_(sd['classification_head.bias'])
+                elif i==10:
+                    model.lang_linear_10.weight.copy_(sd['linear_1.weight'])
+                    model.lang_linear_10.bias.copy_(sd['linear_1.bias'])
+                    model.lang_class_10.weight.copy_(sd['classification_head.weight'])
+                    model.lang_class_10.bias.copy_(sd['classification_head.bias'])
+                else:
+                    print("Too many language labels")
+                    sys.exit(-1)
+            del sd
+
+        gc.collect()
+
+
 
     model.to(device)
     no_decay = ['bias', 'final_layer_norm.weight']
@@ -137,9 +210,8 @@ def main():
             model.load_state_dict(state_dict, False) # do not enforce keys to be present
             logger.info("Loaded saved model")
 
-
-        train_features = convert_examples_to_features(
-            train_examples, label_list, args.max_seq_length, model.encode_word)
+        train_features = processor.convert_examples_to_features(
+            train_examples, label_list, args.max_seq_length, model.encode_word, args.num_seq)
 
         logger.info("***** Running training *****")
         logger.info("  Num examples = %d", len(train_examples))
@@ -155,8 +227,8 @@ def main():
 
         # getting validation samples
         val_examples = processor.get_dev_examples(args.data_dir)
-        val_features = convert_examples_to_features(
-            val_examples, label_list, args.max_seq_length, model.encode_word)
+        val_features = processor.convert_examples_to_features(
+            val_examples, label_list, args.max_seq_length, model.encode_word, args.num_seq)
 
         val_data = create_dataset(val_features)
         
@@ -201,7 +273,7 @@ def main():
                     global_step += 1
             
             logger.info("\nTesting on validation set...")
-            f1, report = evaluate_model(model, val_data, label_list, args.eval_batch_size, device)
+            f1, report = evaluate_model(model, val_data, label_list, args.eval_batch_size, device, args.task_name)
             if f1 > best_val_f1:
                 best_val_f1 = f1
                 bestEpoch=currentEpoch
@@ -231,15 +303,15 @@ def main():
             eval_examples = processor.get_test_examples(args.data_dir)
         else:
             raise ValueError("eval on dev or test set only")
-        eval_features = convert_examples_to_features(
-            eval_examples, label_list, args.max_seq_length, model.encode_word)
+        eval_features = processor.convert_examples_to_features(
+            eval_examples, label_list, args.max_seq_length, model.encode_word, args.num_seq)
         
         logger.info("***** Running evaluation *****")
         logger.info("  Num examples = %d", len(eval_examples))
         logger.info("  Batch size = %d", args.eval_batch_size)
         
         eval_data = create_dataset(eval_features)
-        f1_score, report = evaluate_model(model, eval_data, label_list, args.eval_batch_size, device)
+        f1_score, report = evaluate_model(model, eval_data, label_list, args.eval_batch_size, device, args.task_name)
 
        
         logger.info("\n%s", report)
@@ -251,44 +323,48 @@ def main():
 
     if args.do_predict:
         if args.predict_on == "dev":
-            eval_examples = processor.get_dev_examples(args.data_dir)
+            eval_examples = processor.get_dev_examples(args.data_dir,True)
             eval_sentences = processor.get_dev_sentences(args.data_dir)
         elif args.predict_on == "test":
-            eval_examples = processor.get_test_examples(args.data_dir)
+            eval_examples = processor.get_test_examples(args.data_dir,True)
             eval_sentences = processor.get_test_sentences(args.data_dir)
         elif args.predict_on == "deploy":
-            eval_examples = processor.get_deploy_examples(args.data_dir)
+            eval_examples = processor.get_deploy_examples(args.data_dir,True)
             eval_sentences = processor.get_deploy_sentences(args.data_dir)
         else:
             raise ValueError("Predict on dev, test or deploy set only")
-        eval_features = convert_examples_to_features(
-            eval_examples, label_list, args.max_seq_length, model.encode_word)
+        eval_features = processor.convert_examples_to_features(
+            eval_examples, label_list, args.max_seq_length, model.encode_word, args.num_seq)
         
         logger.info("***** Running prediction *****")
         logger.info("  Num examples = %d", len(eval_examples))
         logger.info("  Num sentences = %d", len(eval_sentences))
         logger.info("  Batch size = %d", args.predict_batch_size)
-        logger.info("  Writing predictions to file [{}]".format(args.predict_filename));
+        logger.info("  Writing predictions to file [{}]".format(args.predict_filename))
         
         eval_data = create_dataset(eval_features)
-        prediction = predict_model(model, eval_data, label_list, args.predict_batch_size, device)
+        prediction = predict_model(model, eval_data, label_list, args.predict_batch_size, device, args.task_name)
 
         output_eval_file = os.path.join(args.output_dir, args.predict_filename)
         with open(output_eval_file, "w") as writer:
             logger.info("***** Writing results to file *****")
             for (i,sent) in enumerate(eval_sentences):
-                for (j,tok) in enumerate(sent[0]):
-                    pred="O"
-                    if j>=len(prediction[i]):
-                        logger.info("WARNING: Not enough tokens predicted in sentence {} ({}/{})".format(i,len(prediction[i]),len(sent[0])))
-                    else:
-                        pred=prediction[i][j]
-
+                if args.task_name=="lang_detect":
                     if args.predict_format == "ann_only":
-                        writer.write("{}\n".format(pred))
-                    else:
-                        writer.write("{} {}\n".format(tok,pred))
-                writer.write("\n")
+                        writer.write("{}\n".format(prediction[i][0]))
+                else:
+                    for (j,tok) in enumerate(sent[0]):
+                        pred="O"
+                        if j>=len(prediction[i]):
+                            logger.info("WARNING: Not enough tokens predicted in sentence {} ({}/{})".format(i,len(prediction[i]),len(sent[0])))
+                        else:
+                            pred=prediction[i][j]
+	
+                        if args.predict_format == "ann_only":
+                            writer.write("{}\n".format(pred))
+                        else:
+                            writer.write("{} {}\n".format(tok,pred))
+                    writer.write("\n")
             logger.info("Done.")
 
     if args.server:
@@ -308,10 +384,10 @@ def main():
             data = processor.get_deploy_examples_from_text(text,args.lang)
             doc=data["doc"]
             eval_examples = data["examples"]
-            eval_features = convert_examples_to_features(
+            eval_features = processor.convert_examples_to_features(
                 eval_examples, label_list, args.max_seq_length, model.encode_word)
             eval_data = create_dataset(eval_features)
-            prediction = predict_model(model, eval_data, label_list, args.predict_batch_size, device)
+            prediction = predict_model(model, eval_data, label_list, args.predict_batch_size, device, task=args.task_name)
             
             #print(prediction)
 

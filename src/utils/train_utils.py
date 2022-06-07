@@ -1,8 +1,8 @@
+import argparse
+
 from torch.utils.data import SequentialSampler, DataLoader
-from tqdm import tqdm
 from seqeval.metrics import f1_score, classification_report
 import torch
-import torch.nn.functional as F
 
 def parseLabels(string):
     return string.split(",")
@@ -55,9 +55,17 @@ def add_xlmr_args(parser):
                          help="The maximum total input sequence length after WordPiece tokenization. \n"
                               "Sequences longer than this will be truncated, and sequences shorter \n"
                               "than this will be padded.")
+     parser.add_argument("--num_seq",
+                         default=1,
+                         type=int,
+                         help="Number of sequences (to allow for longer documents).")
      parser.add_argument("--do_train",
                          action='store_true',
                          help="Whether to run training.")
+
+     parser.add_argument("--debug",
+                         action='store_true',
+                         help="Turn on debug mode.")
 
      parser.add_argument("--do_eval",
                          action='store_true',
@@ -145,8 +153,19 @@ def add_xlmr_args(parser):
 
      parser.add_argument('--labels', 
                         type=parseLabels,
+                         default=["en","ro"],
+                         help = "Labels to use for training")
+     parser.add_argument('--ner_labels',
+                        type=parseLabels,
                          default=["O", "B-PER", "I-PER", "B-ORG", "I-ORG", "B-LOC", "I-LOC", "B-MISC", "I-MISC"],
                          help = "Labels to use for training")
+     parser.add_argument('--pretrained_ner', 
+                        type=parseLabels,
+                         default=[],
+                         help = "Pretrained NER models")
+     parser.add_argument("--pretrained_lang_detect",
+                         default="",
+                         help="Pretrained lang_detect model.")
 
      parser.add_argument('--use_norm', 
                          action="store_true",
@@ -179,7 +198,7 @@ def add_xlmr_args(parser):
      return parser
 
 
-def evaluate_model(model, eval_dataset, label_list, batch_size, device):
+def evaluate_model(model, eval_dataset, label_list, batch_size, device, task):
      """
      Evaluates an NER model on the eval_dataset provided.
      Returns:
@@ -197,7 +216,12 @@ def evaluate_model(model, eval_dataset, label_list, batch_size, device):
      y_true = []
      y_pred = []
 
-     label_map = {i: label for i, label in enumerate(label_list, 1)}
+     if task=="lang_detect":
+        label_map = {i: label for i, label in enumerate(label_list, 0)}
+     else:
+        label_map = {i: label for i, label in enumerate(label_list, 1)}
+        label_map[0]="IGNORE"
+     print(label_list)
 
      for input_ids, label_ids, l_mask, valid_ids in eval_dataloader:
 
@@ -211,11 +235,31 @@ def evaluate_model(model, eval_dataset, label_list, batch_size, device):
                logits = model(input_ids, labels=None, labels_mask=None,
                               valid_mask=valid_ids)
 
-          logits = torch.argmax(logits, dim=2)
-          logits = logits.detach().cpu().numpy()
-          label_ids = label_ids.cpu().numpy()
 
-          for i, cur_label in enumerate(label_ids):
+          if task=="lang_detect":
+            logits = torch.argmax(logits, dim=1) # era 2 pt ner
+            logits = logits.detach().cpu().numpy()
+            label_ids = label_ids.cpu().numpy()
+
+            #print(label_ids)
+
+            for i, cur_label in enumerate(label_ids):
+               #print(cur_label)
+               temp_1 = []
+               temp_2 = []
+
+               temp_1.append(label_map[cur_label])
+               temp_2.append(label_map[logits[i]])
+
+               assert len(temp_1) == len(temp_2)
+               y_true.append(temp_1)
+               y_pred.append(temp_2)
+          else:
+            logits = torch.argmax(logits, dim=2) # era 2 pt ner
+            logits = logits.detach().cpu().numpy()
+            label_ids = label_ids.cpu().numpy()
+
+            for i, cur_label in enumerate(label_ids):
                temp_1 = []
                temp_2 = []
 
@@ -233,7 +277,7 @@ def evaluate_model(model, eval_dataset, label_list, batch_size, device):
 
      return f1, report
 
-def predict_model(model, predict_dataset, label_list, batch_size, device):
+def predict_model(model, predict_dataset, label_list, batch_size, device, task):
      """
      Executes a NER model on the predict_dataset provided and returns predictions.
      Returns:
@@ -249,7 +293,12 @@ def predict_model(model, predict_dataset, label_list, batch_size, device):
 
      y_pred = []
 
-     label_map = {i: label for i, label in enumerate(label_list, 1)}
+     if task=="lang_detect":
+        label_map = {i: label for i, label in enumerate(label_list, 0)}
+     else:
+        label_map = {i: label for i, label in enumerate(label_list, 1)}
+        #label_map[0]="IGNORE" # This should not occur during predict
+     print(label_list)
 
      for input_ids, label_ids, l_mask, valid_ids in predict_dataloader:
 
@@ -260,15 +309,25 @@ def predict_model(model, predict_dataset, label_list, batch_size, device):
                logits = model(input_ids, labels=None, labels_mask=None,
                               valid_mask=valid_ids)
 
-          logits = torch.argmax(logits, dim=2)
-          logits = logits.detach().cpu().numpy()
+          if task=="lang_detect":
+            logits = torch.argmax(logits, dim=1) # era 2 pt ner
+            logits = logits.detach().cpu().numpy()
 
-          for i, cur_label in enumerate(logits):
+            for i, cur_label in enumerate(logits):
+               temp_2 = []
+               temp_2.append(label_map[logits[i]])
+               y_pred.append(temp_2)
+          else:
+            logits = torch.argmax(logits, dim=2)
+            logits = logits.detach().cpu().numpy()
+
+            for i, cur_label in enumerate(logits):
                temp_2 = []
 
                for j, m in enumerate(cur_label):
                     if valid_ids[i][j]:  # if it's a valid label
-                         temp_2.append(label_map[logits[i][j]])
+                         if logits[i][j]==0: temp_2.append('O')
+                         else: temp_2.append(label_map[logits[i][j]]) # pt lang detect nu are 2 dimensiuni
 
                y_pred.append(temp_2)
 
