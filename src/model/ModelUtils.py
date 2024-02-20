@@ -1,6 +1,6 @@
 from model.ModelLangDetect import ModelLangDetect
 from model.ModelNER import ModelNER
-from model.ModelNERMulti import ModelNERMulti
+from model.ModelNERMulti_notsaving import ModelNERMulti
 import sys
 
 def get_model_for_task(

@@ -29,13 +29,27 @@ class ModelNERMulti(nn.Module):
         
         self.label_ignore_idx = label_ignore_idx
 
-        self.xlmr=LayerXLMREmbeddings(pretrained_path,hidden_size,dropout_p,device)
+        self.xlmr=LayerXLMREmbeddings(pretrained_path,hidden_size,device=device, use_norm=False,use_li=False,
+                                      li_dropout_p=dropout_p,li_sigma=10)
         self.lang_detect=LayerLangDetect(self.num_languages,hidden_size,dropout_p,head_init_range,device)
 
         self.device=device
 
         # initializing classification head
         #self.classification_head.weight.data.normal_(mean=0.0, std=head_init_range)
+
+    def state_dict(self, destination=None, prefix='', keep_vars=False):
+        original_dict = super().state_dict(destination, prefix, keep_vars)
+        for i in range(self.num_languages):
+            original_dict[prefix + 'lang_linear_{}'.format(i)] = self.lang_linear[i].state_dict()
+            original_dict[prefix + 'lang_class_{}'.format(i)] = self.lang_class[i].state_dict()
+        return original_dict
+
+    def load_state_dict(self, state_dict, strict = True):
+        for i in range(self.num_languages):
+            self.lang_linear[i].load_state_dict(state_dict.pop("lang_linear_{}".format(i)),strict)
+            self.lang_class[i].load_state_dict(state_dict.pop("lang_class_{}".format(i)),strict)
+        super().load_state_dict(state_dict, strict)
 
     def soft_argmax(self,data):
         alpha = 1000.0 
