@@ -19,7 +19,7 @@ from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
 from seqeval.metrics import classification_report
 from model.xlmr_for_token_classification import XLMRForTokenClassification
 from utils.train_utils import add_xlmr_args, evaluate_model, predict_model
-from utils.data_utils import NerProcessor, create_dataset, convert_examples_to_features
+from utils.data_utils import NerProcessor, create_dataset, convert_examples_to_features, create_features_from_conllup
 
 from tqdm import tqdm as tqdm
 from tqdm import trange
@@ -349,6 +349,70 @@ def main():
                 lastTok=token
 
             return jsonify({'status':'OK','result':r})
+
+        def get_input_data(expected_values):
+            if "input" not in request.values:
+                return False, None, jsonify({"status": "ERROR", "message": "Missing input parameter"})
+
+            try:
+                data = json.loads(request.values["input"])
+            except json.JSONDecodeError:
+                return False, None, jsonify({"status": "ERROR", "message": "Invalid JSON provided in the input parameter"})
+
+            if data is None:
+                return False, None, jsonify(
+                    {"status": "ERROR", "message": "Invalid input JSON provided in the input parameter"})
+
+            for v in expected_values:
+                if v not in data:
+                    return False, None, jsonify({"status": "ERROR",
+                                                "message": "Invalid input JSON provided in the input parameter. Missing field {value}".format(
+                                                    value=v)})
+
+            return True, data, None
+
+
+        @app.route("/process", methods=["GET","POST"])
+        def ner_process():
+            status, data, error = get_input_data(["input","output"])
+            if not status: return error
+
+            input_file = data["input"]
+            output_file = data["output"]
+
+            r = create_features_from_conllup(input_file, label_list, args.max_seq_length, model.encode_word)
+            eval_features=r['features']
+            conllup=r['conllup']
+            eval_data = create_dataset(eval_features)
+            prediction = predict_model(model, eval_data, label_list, args.predict_batch_size, device, True)
+            
+            #print(prediction)
+
+            with open(output_file,"w") as fout:
+                lastTokenId=0
+                forceStop=False
+                for p in prediction:
+                    if forceStop: break
+                    for y in p:
+                        tokId=y['token_id']
+                        label=y['label']
+
+                        if tokId<lastTokenId: continue
+
+                        while lastTokenId<tokId and lastTokenId<len(conllup):
+                            fout.write(conllup[lastTokenId])
+                            fout.write("\n")
+                            lastTokenId+=1
+                        
+                        if lastTokenId>=len(conllup):
+                            forceStop=True
+                            break
+
+                        fout.write("{}\t{}\n".format(conllup[lastTokenId],label))
+                        lastTokenId+=1
+
+            return jsonify({'status':'OK','message':''})
+
 
         app.run(threaded=False, debug=False, host="127.0.0.1", port=args.server_port)
 

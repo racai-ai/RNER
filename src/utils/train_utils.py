@@ -233,7 +233,7 @@ def evaluate_model(model, eval_dataset, label_list, batch_size, device):
 
      return f1, report
 
-def predict_model(model, predict_dataset, label_list, batch_size, device):
+def predict_model(model, predict_dataset, label_list, batch_size, device, use_conllup_ids=False):
      """
      Executes a NER model on the predict_dataset provided and returns predictions.
      Returns:
@@ -251,7 +251,7 @@ def predict_model(model, predict_dataset, label_list, batch_size, device):
 
      label_map = {i: label for i, label in enumerate(label_list, 1)}
 
-     for input_ids, label_ids, l_mask, valid_ids in predict_dataloader:
+     for input_ids, label_ids, l_mask, valid_ids, token_conllup_ids in predict_dataloader:
 
           input_ids = input_ids.to(device)
           valid_ids = valid_ids.to(device)
@@ -268,7 +268,10 @@ def predict_model(model, predict_dataset, label_list, batch_size, device):
 
                for j, m in enumerate(cur_label):
                     if valid_ids[i][j]:  # if it's a valid label
-                         temp_2.append(label_map[logits[i][j]])
+                         if use_conllup_ids:
+                              temp_2.append({"label":label_map[logits[i][j]],"token_id":token_conllup_ids[i][j]})
+                         else:
+                              temp_2.append(label_map[logits[i][j]])
 
                y_pred.append(temp_2)
 
