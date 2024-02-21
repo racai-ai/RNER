@@ -30,12 +30,16 @@ class InputExample(object):
 class InputFeatures(object):
     """A single set of features of data."""
 
-    def __init__(self, input_ids, input_mask, label_id, valid_ids=None, label_mask=None):
+    def __init__(self, input_ids, input_mask, label_id, valid_ids=None, label_mask=None, token_conllup_ids=None):
         self.input_ids = input_ids
         self.input_mask = input_mask
         self.label_id = label_id
         self.valid_ids = valid_ids
         self.label_mask = label_mask
+        if token_conllup_ids is None:
+            self.token_conllup_ids=[-1 for id in self.input_ids]
+        else:
+            self.token_conllup_ids = token_conllup_ids
 
 
 class NerProcessor:
@@ -79,7 +83,6 @@ class NerProcessor:
     def get_deploy_examples_from_text(self,text,lang):
         data=self._read_text(text,lang)
         return {"examples":self._create_examples(data["data"],"deploy"), "doc":data["doc"]}
-
 
     def get_labels(self):
         return self.labels
@@ -277,6 +280,140 @@ def convert_examples_to_features(examples, label_list, max_seq_length, encode_me
 
     return features
 
+def makeFeature(ctoken_ids, clabels, clabel_mask, cvalid, max_seq_length, ignored_label, label_map, ctoken_conllup_ids):
+
+    token_ids=ctoken_ids
+    labels=clabels
+    label_mask=clabel_mask
+    valid=cvalid
+    token_conllup_ids=ctoken_conllup_ids
+
+    # adding <s>
+    token_ids.insert(0, 0)
+    token_conllup_ids.insert(0,-1)
+    labels.insert(0, ignored_label)
+    label_mask.insert(0, 0)
+    valid.insert(0, 0)
+
+    # adding </s>
+    token_ids.append(2)
+    token_conllup_ids.append(-1)
+    labels.append(ignored_label)
+    label_mask.append(0)
+    valid.append(0)
+
+    assert len(token_ids) == len(labels)
+    assert len(valid) == len(labels)
+
+    label_ids = []
+    for i, _ in enumerate(token_ids):
+        label_ids.append(label_map[labels[i]])
+
+    assert len(token_ids) == len(label_ids)
+    assert len(valid) == len(label_ids)
+
+    input_mask = [1] * len(token_ids)
+
+    while len(token_ids) < max_seq_length:
+        token_ids.append(1)  # token padding idx
+        input_mask.append(0)
+        label_ids.append(label_map[ignored_label])  # label ignore idx
+        valid.append(0)
+        label_mask.append(0)
+        token_conllup_ids.append(-1)
+
+    while len(label_ids) < max_seq_length:
+        label_ids.append(label_map[ignored_label])
+        label_mask.append(0)
+
+    assert len(token_ids) == max_seq_length
+    assert len(input_mask) == max_seq_length
+    assert len(label_ids) == max_seq_length
+    assert len(valid) == max_seq_length
+    assert len(label_mask) == max_seq_length
+    assert len(token_conllup_ids) == max_seq_length
+
+    return InputFeatures(input_ids=token_ids,
+                          input_mask=input_mask,
+                          label_id=label_ids,
+                          valid_ids=valid,
+                          label_mask=label_mask,
+                          token_conllup_ids=token_conllup_ids)
+
+def create_features_from_conllup(input_file, label_list, max_seq_length, encode_method):
+    """Converts a set of examples into XLMR compatible format
+
+    * Labels are only assigned to the positions correspoinding to the first BPE token of each word.
+    * Other positions are labeled with 0 ("IGNORE")
+
+    """
+    ignored_label = "IGNORE"
+    label_map = {label: i for i, label in enumerate(label_list, 1)}
+    label_map[ignored_label] = 0  # 0 label is to be ignored
+    
+    features = []
+    conllup = []
+
+    labels = []
+    valid = []
+    label_mask = []
+    token_ids = []
+    token_conllup_ids = []
+    with open(input_file,"r", encoding="utf-8", errors="ignore") as fin:
+        for line in fin:
+            line=line.rstrip()
+            tokenConllupId=len(conllup)
+            conllup.append(line)
+            
+            if len(line)==0 or line.startswith("#"):
+                if len(token_ids)>0:
+                    features.append(makeFeature(token_ids,labels,label_mask,valid, max_seq_length, ignored_label, label_map, token_conllup_ids))
+                    labels=[]
+                    valid=[]
+                    label_mask=[]
+                    token_ids=[]
+                    token_conllup_ids=[]
+                continue
+
+            tokenData=line.split("\t")
+
+            word=tokenData[1]
+            tokens = encode_method(word.strip())  # word token ids 
+
+            if len(token_ids)+len(tokens)>=max_seq_length-2:
+                features.append(makeFeature(token_ids,labels,label_mask,valid, max_seq_length, ignored_label, label_map, token_conllup_ids))
+                token_ids=token_ids[-20:]
+                labels=labels[-20:]
+                label_mask=label_mask[-20:]
+                valid=valid[-20:]
+                token_conllup_ids=token_conllup_ids[-20:]
+
+            token_ids.extend(tokens)  # all sentence token ids
+            for m in range(len(tokens)):
+                if m == 0:  # only label the first BPE token of each work
+                    labels.append("O")
+                    valid.append(1)
+                    label_mask.append(1)
+                    token_conllup_ids.append(tokenConllupId)
+                else:
+                    labels.append(ignored_label)  # unlabeled BPE token
+                    label_mask.append(0)
+                    valid.append(0)
+                    token_conllup_ids.append(-1)
+
+            #if len(token_ids) >= max_seq_length - 1:  # trim extra tokens
+            #    token_ids = token_ids[0:(max_seq_length-2)]
+            #    labels = labels[0:(max_seq_length-2)]
+            #    valid = valid[0:(max_seq_length-2)]
+            #    label_mask = label_mask[0:(max_seq_length-2)]
+
+
+
+    if len(token_ids)>0:
+        features.append(makeFeature(token_ids,labels,label_mask,valid, max_seq_length, ignored_label, label_map, token_conllup_ids))
+
+    return {"features":features, "conllup":conllup}
+
 
 def create_dataset(features):
     
@@ -288,6 +425,8 @@ def create_dataset(features):
         [f.valid_ids for f in features], dtype=torch.long)
     all_lmask_ids = torch.tensor(
         [f.label_mask for f in features], dtype=torch.long)
+    all_token_conllup_ids = torch.tensor(
+        [f.token_conllup_ids for f in features], dtype=torch.long)        
 
     return TensorDataset(
-        all_input_ids, all_label_ids, all_lmask_ids, all_valid_ids)
+        all_input_ids, all_label_ids, all_lmask_ids, all_valid_ids,all_token_conllup_ids)
