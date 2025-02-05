@@ -173,7 +173,7 @@ def main():
             model.train()
             for step, batch in enumerate(tbar):
                 batch = tuple(t.to(device) for t in batch)
-                input_ids, label_ids, l_mask, valid_ids, = batch
+                input_ids, label_ids, l_mask, valid_ids, not_used = batch
                 loss = model(input_ids, label_ids, l_mask, valid_ids)
 
                 if args.gradient_accumulation_steps > 1:

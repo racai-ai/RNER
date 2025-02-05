@@ -199,7 +199,7 @@ def evaluate_model(model, eval_dataset, label_list, batch_size, device):
 
      label_map = {i: label for i, label in enumerate(label_list, 1)}
 
-     for input_ids, label_ids, l_mask, valid_ids in eval_dataloader:
+     for input_ids, label_ids, l_mask, valid_ids, not_used in eval_dataloader:
 
           input_ids = input_ids.to(device)
           label_ids = label_ids.to(device)
@@ -229,7 +229,7 @@ def evaluate_model(model, eval_dataset, label_list, batch_size, device):
                y_pred.append(temp_2)
 
      report = classification_report(y_true, y_pred, digits=4)
-     f1 = f1_score(y_true, y_pred, average='Macro')
+     f1 = f1_score(y_true, y_pred, average='macro')
 
      return f1, report
 
