@@ -187,9 +187,11 @@ def convert_examples_to_features(examples, label_list, max_seq_length, encode_me
         valid = []
         label_mask = []
         token_ids = []
+        word_tokids = []
        
         for i, word in enumerate(textlist):  
             tokens = encode_method(word.strip())  # word token ids   
+            word_tokids.append({"word":word.strip(),"tokids":tokens})
             token_ids.extend(tokens)  # all sentence token ids
             label_1 = labellist[i]
             for m in range(len(tokens)):
@@ -202,6 +204,8 @@ def convert_examples_to_features(examples, label_list, max_seq_length, encode_me
                     label_mask.append(0)
                     valid.append(0)
 
+        logging.debug("tokens: %s" % " ".join(
+                [x["word"]+" ("+" ".join([str(y) for y in x["tokids"]])+")" for x in word_tokids]))
         logging.debug("token ids = ")
         logging.debug(token_ids)
         logging.debug("labels = ")
@@ -260,9 +264,9 @@ def convert_examples_to_features(examples, label_list, max_seq_length, encode_me
             logging.info("*** Example ***")
             logging.info("guid: %s" % (example.guid))
             logging.info("tokens: %s" % " ".join(
-                [str(x) for x in token_ids]))
-            logging.info("input_ids: %s" %
-                         " ".join([str(x) for x in token_ids]))
+                [x["word"]+" ("+" ".join([str(y) for y in x["tokids"]])+")" for x in word_tokids]))
+            logging.info("input_ids (%d): %s" %
+                         (len(token_ids), " ".join([str(x) for x in token_ids])))
             logging.info("input_mask: %s" %
                          " ".join([str(x) for x in input_mask]))
             logging.info("label: %s (id = %s)" % (example.label, " ".join(map(str, label_ids))))
