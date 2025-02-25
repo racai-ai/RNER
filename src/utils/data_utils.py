@@ -5,6 +5,7 @@ import sys
 import torch 
 from torch.utils.data import TensorDataset
 import spacy
+import io
 
 class InputExample(object):
     """A single training/test example for simple sequence classification."""
@@ -344,7 +345,7 @@ def makeFeature(ctoken_ids, clabels, clabel_mask, cvalid, max_seq_length, ignore
                           label_mask=label_mask,
                           token_conllup_ids=token_conllup_ids)
 
-def create_features_from_conllup(input_file, label_list, max_seq_length, encode_method):
+def create_features_from_conllup(input_file, label_list, max_seq_length, encode_method, conllup_column_separator="\t", conllup_comment="#", conllup_column_word=1, input_is_file=True):
     """Converts a set of examples into XLMR compatible format
 
     * Labels are only assigned to the positions correspoinding to the first BPE token of each word.
@@ -363,13 +364,13 @@ def create_features_from_conllup(input_file, label_list, max_seq_length, encode_
     label_mask = []
     token_ids = []
     token_conllup_ids = []
-    with open(input_file,"r", encoding="utf-8", errors="ignore") as fin:
+    with (open(input_file,"r", encoding="utf-8", errors="ignore") if input_is_file else io.StringIO(input_file)) as fin:
         for line in fin:
             line=line.rstrip()
             tokenConllupId=len(conllup)
             conllup.append(line)
             
-            if len(line)==0 or line.startswith("#"):
+            if len(line)==0 or (len(conllup_comment)>0 and line.startswith(conllup_comment)):
                 if len(token_ids)>0:
                     features.append(makeFeature(token_ids,labels,label_mask,valid, max_seq_length, ignored_label, label_map, token_conllup_ids))
                     labels=[]
@@ -379,9 +380,9 @@ def create_features_from_conllup(input_file, label_list, max_seq_length, encode_
                     token_conllup_ids=[]
                 continue
 
-            tokenData=line.split("\t")
+            tokenData=line.split(conllup_column_separator)
 
-            word=tokenData[1]
+            word=tokenData[conllup_column_word]
             tokens = encode_method(word.strip())  # word token ids 
 
             if len(token_ids)+len(tokens)>=max_seq_length-2:

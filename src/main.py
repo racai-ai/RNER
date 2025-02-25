@@ -7,6 +7,7 @@ import logging
 import os
 import random
 import sys
+import io
 
 import numpy as np
 import torch
@@ -412,6 +413,57 @@ def main():
                         lastTokenId+=1
 
             return jsonify({'status':'OK','message':''})
+
+
+        @app.route("/process_conllup", methods=["GET","POST"])
+        def ner_process_conllup():
+            input_file=request.values["input"];
+
+            separator="\t"
+            if "separator" in request.values: separator=request.values["separator"]
+
+            column=1
+            if "column" in request.values: column=int(request.values["column"])
+
+            comment="#"
+            if "comment" in request.values: comment=request.values["comment"]
+
+            r = create_features_from_conllup(input_file, label_list, args.max_seq_length, model.encode_word,conllup_column_separator=separator, conllup_column_word=column,conllup_comment=comment, input_is_file=False)
+            eval_features=r['features']
+            conllup=r['conllup']
+            eval_data = create_dataset(eval_features)
+            prediction = predict_model(model, eval_data, label_list, args.predict_batch_size, device, True)
+            
+            #print(prediction)
+
+            output_file=""
+            with io.StringIO() as fout:
+                lastTokenId=0
+                forceStop=False
+                for p in prediction:
+                    if forceStop: break
+                    for y in p:
+                        tokId=y['token_id']
+                        label=y['label']
+
+                        if tokId<lastTokenId: continue
+
+                        while lastTokenId<tokId and lastTokenId<len(conllup):
+                            fout.write(conllup[lastTokenId])
+                            fout.write("\n")
+                            lastTokenId+=1
+                        
+                        if lastTokenId>=len(conllup):
+                            forceStop=True
+                            break
+
+                        fout.write("{}{}{}\n".format(conllup[lastTokenId],separator,label))
+                        lastTokenId+=1
+
+                fout.seek(0)
+                output_file=fout.read();
+
+            return jsonify({'status':'OK','message':'','output':output_file})
 
 
         app.run(threaded=False, debug=False, host="127.0.0.1", port=args.server_port)
